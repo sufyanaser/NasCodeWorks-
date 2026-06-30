@@ -14,7 +14,7 @@ type SupabaseContentRow = { content_json: unknown }
 
 const CONTENT_KEY = 'v2'
 const ADMIN_COOKIE_NAME = 'nas_admin_session'
-const defaultContent = {
+const defaultContent = JSON.parse(String.raw`{
   "meta": {
     "version": 1,
     "updatedAt": ""
@@ -192,7 +192,7 @@ const defaultContent = {
     "bottomRight": "برمجة محلية · بياناتك بجهازك · دعم بلغتك"
   }
 }
-
+`) as unknown
 
 function clean(value: unknown) {
   return typeof value === 'string' ? value.trim().replace(/\/$/, '') : ''
@@ -204,7 +204,7 @@ function getAuthSalt() {
 
 function getCookieValue(cookieHeader: string | undefined, name: string) {
   if (!cookieHeader) return ''
-  const match = cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(${name}=))
+  const match = cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))
   if (!match) return ''
   try {
     return decodeURIComponent(match.slice(name.length + 1))
@@ -214,7 +214,7 @@ function getCookieValue(cookieHeader: string | undefined, name: string) {
 }
 
 async function makeSessionToken(code: string) {
-  const input = new TextEncoder().encode(${code}:)
+  const input = new TextEncoder().encode(`${code}:${getAuthSalt()}`)
   const digest = await crypto.subtle.digest('SHA-256', input)
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -234,7 +234,7 @@ function getSupabaseEnv() {
 function supabaseHeaders(key: string) {
   return {
     apikey: key,
-    Authorization: Bearer ,
+    Authorization: `Bearer ${key}`,
     'Content-Type': 'application/json',
   }
 }
@@ -246,7 +246,7 @@ async function loadContent() {
     return { ok: true, source: 'default', content: defaultContent, message: 'Supabase is not configured.' }
   }
 
-  const response = await fetch(${supabase.url}/rest/v1/site_content?key=eq.&select=content_json&limit=1, {
+  const response = await fetch(`${supabase.url}/rest/v1/site_content?key=eq.${CONTENT_KEY}&select=content_json&limit=1`, {
     headers: supabaseHeaders(supabase.key),
   })
 
@@ -266,7 +266,7 @@ async function saveContent(content: unknown) {
     return { ok: false, message: 'Supabase is not configured.' }
   }
 
-  const response = await fetch(${supabase.url}/rest/v1/site_content?on_conflict=key, {
+  const response = await fetch(`${supabase.url}/rest/v1/site_content?on_conflict=key`, {
     method: 'POST',
     headers: {
       ...supabaseHeaders(supabase.key),
