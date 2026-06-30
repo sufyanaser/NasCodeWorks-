@@ -7,6 +7,16 @@ type IntakePayload = {
   subjectPrefix?: string
 }
 
+type IntakeSubmissionRow = {
+  id: string
+  company: string
+  contact: string | null
+  problem_type: string | null
+  description: string
+  status: string
+  created_at: string
+}
+
 type VercelResponse = {
   status: (code: number) => VercelResponse
   json: (body: unknown) => void
@@ -48,6 +58,26 @@ function supabaseHeaders(key: string) {
   }
 }
 
+async function listIntakeSubmissions() {
+  const supabase = getSupabaseEnv()
+
+  if (!supabase) {
+    return { ok: false, message: 'Supabase is not configured.', submissions: [] as IntakeSubmissionRow[] }
+  }
+
+  const response = await fetch(`${supabase.url}/rest/v1/intake_submissions?select=*&order=created_at.desc&limit=50`, {
+    headers: supabaseHeaders(supabase.key),
+  })
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText)
+    return { ok: false, message, submissions: [] as IntakeSubmissionRow[] }
+  }
+
+  const submissions = await response.json() as IntakeSubmissionRow[]
+  return { ok: true, submissions }
+}
+
 async function saveIntakeSubmission(input: { company: string; contact: string; problemType: string; description: string }) {
   const supabase = getSupabaseEnv()
 
@@ -83,8 +113,16 @@ async function sendEmail(input: { company: string; contact: string; problemType:
   const fromEmail = clean(process.env.NAS_INTAKE_FROM) || 'NAS CodeWorks <onboarding@resend.dev>'
   const resendApiKey = clean(process.env.RESEND_API_KEY)
 
+  if (!input.recipientEmail) {
+    return { ok: false, skipped: true, message: 'Recipient email is not configured.' }
+  }
+
+  if (!isEmail(input.recipientEmail)) {
+    return { ok: false, skipped: true, message: 'Recipient email is invalid.' }
+  }
+
   if (!resendApiKey) {
-    return { ok: false, message: 'RESEND_API_KEY is not configured.' }
+    return { ok: false, skipped: true, message: 'RESEND_API_KEY is not configured.' }
   }
 
   const subject = `${input.subjectPrefix}: ${input.company}`
@@ -122,11 +160,16 @@ async function sendEmail(input: { company: string; contact: string; problemType:
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
   if (req.method === 'OPTIONS') {
     return res.status(204).json(null)
+  }
+
+  if (req.method === 'GET') {
+    const result = await listIntakeSubmissions()
+    return res.status(result.ok ? 200 : 503).json(result)
   }
 
   if (req.method !== 'POST') {
@@ -147,16 +190,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, message: 'Company and problem description are required.' })
   }
 
-  if (!isEmail(recipientEmail)) {
-    return res.status(400).json({ ok: false, message: 'Recipient email is missing or invalid.' })
+  const storage = await saveIntakeSubmission({ company, contact, problemType, description })
+
+  if (!storage.ok) {
+    return res.status(502).json({ ok: false, message: storage.message, storage })
   }
 
-  const storage = await saveIntakeSubmission({ company, contact, problemType, description })
   const email = await sendEmail({ company, contact, problemType, description, recipientEmail, subjectPrefix })
 
-  if (!email.ok) {
-    return res.status(502).json({ ok: false, message: email.message, storage })
-  }
-
-  return res.status(200).json({ ok: true, message: 'Intake saved and email sent.', storage, email })
+  return res.status(200).json({
+    ok: true,
+    message: email.ok ? 'Intake saved and email sent.' : 'Intake saved. Email notification skipped or failed.',
+    storage,
+    email,
+  })
 }
