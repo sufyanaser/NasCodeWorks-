@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Database, Mail, Save, Settings, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Cloud, Database, Mail, Save, Settings, ShieldCheck } from 'lucide-react'
 import { CONTENT_STORAGE_KEY, defaultContent, type SiteContent } from './content'
 
 type IntakeForm = {
@@ -12,6 +12,13 @@ type IntakeForm = {
 type ViewMode = 'site' | 'admin'
 
 type SubmitState = 'idle' | 'sending' | 'success' | 'error'
+
+type ContentApiResult = {
+  ok: boolean
+  content?: SiteContent
+  message?: string
+  source?: string
+}
 
 const emptyForm: IntakeForm = {
   company: '',
@@ -45,6 +52,7 @@ function App() {
   const [form, setForm] = useState<IntakeForm>(emptyForm)
   const [submitState, setSubmitState] = useState<SubmitState>('idle')
   const [submitMessage, setSubmitMessage] = useState('')
+  const [cloudStatus, setCloudStatus] = useState('Cloud content: local fallback')
 
   const exportedJson = useMemo(() => JSON.stringify(content, null, 2), [content])
 
@@ -52,12 +60,60 @@ function App() {
     window.localStorage.setItem(CONTENT_STORAGE_KEY, JSON.stringify(content))
   }, [content])
 
+  useEffect(() => {
+    void loadCloudContent(false)
+  }, [])
+
   const updateContent = (mutate: (next: SiteContent) => void) => {
     setContent((current) => {
       const next = structuredClone(current)
       mutate(next)
       return next
     })
+  }
+
+  const loadCloudContent = async (showStatus = true) => {
+    try {
+      if (showStatus) setCloudStatus('جاري تحميل النصوص من Supabase...')
+      const response = await fetch('/api/content')
+      const result = await response.json().catch(() => ({ ok: false, message: 'Invalid content API response' })) as ContentApiResult
+
+      if (!response.ok || !result.ok || !result.content) {
+        if (showStatus) setCloudStatus(result.message || 'تعذر تحميل النصوص السحابية.')
+        return
+      }
+
+      setContent(result.content)
+      setCloudStatus(`تم تحميل النصوص من ${result.source || 'cloud'}`)
+    } catch (error) {
+      if (showStatus) setCloudStatus(error instanceof Error ? error.message : 'فشل تحميل النصوص السحابية')
+    }
+  }
+
+  const saveCloudContent = async () => {
+    try {
+      setCloudStatus('جاري حفظ النصوص في Supabase...')
+      const response = await fetch('/api/content', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(content),
+      })
+      const result = await response.json().catch(() => ({ ok: false, message: 'Invalid content API response' })) as ContentApiResult
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || 'Cloud save failed')
+      }
+
+      setCloudStatus('تم حفظ النصوص سحابياً. ستظهر من أي جهاز بعد التحديث.')
+    } catch (error) {
+      setCloudStatus(error instanceof Error ? error.message : 'فشل حفظ النصوص سحابياً')
+    }
+  }
+
+  const resetLocalContent = () => {
+    window.localStorage.removeItem(CONTENT_STORAGE_KEY)
+    setContent(defaultContent)
+    setCloudStatus('تمت استعادة النصوص الافتراضية محلياً فقط.')
   }
 
   const updateForm = (field: keyof IntakeForm, value: string) => {
@@ -115,7 +171,12 @@ function App() {
             <span>CodeWorks Admin</span>
           </div>
           <p>{content.brand.adminNote}</p>
-          <button className="secondary-button" type="button" onClick={() => { window.history.pushState(null, '', '/'); setMode('site') }}>العودة للموقع</button>
+          <div className="admin-side-actions">
+            <button className="secondary-button" type="button" onClick={() => { window.history.pushState(null, '', '/'); setMode('site') }}>العودة للموقع</button>
+            <button className="secondary-button" type="button" onClick={() => void loadCloudContent(true)}><Cloud size={16} /> تحميل سحابي</button>
+            <button className="primary-button" type="button" onClick={() => void saveCloudContent()}><Save size={16} /> حفظ سحابي</button>
+          </div>
+          <p className="notice">{cloudStatus}</p>
         </aside>
 
         <section className="admin-workspace">
@@ -124,7 +185,10 @@ function App() {
               <span>Content Control</span>
               <h1>لوحة تحكم النصوص والإيميل</h1>
             </div>
-            <button className="primary-button" type="button" onClick={() => navigator.clipboard.writeText(exportedJson)}>نسخ JSON</button>
+            <div className="admin-header-actions">
+              <button className="secondary-button" type="button" onClick={resetLocalContent}>استعادة الافتراضي</button>
+              <button className="primary-button" type="button" onClick={() => navigator.clipboard.writeText(exportedJson)}>نسخ JSON</button>
+            </div>
           </header>
 
           <div className="admin-grid">
@@ -143,7 +207,7 @@ function App() {
               <Field label="بادئة عنوان الإيميل" value={content.intake.subjectPrefix} onChange={(value) => updateContent((next) => { next.intake.subjectPrefix = value })} />
               <Field label="رسالة النجاح" value={content.intake.successMessage} multiline onChange={(value) => updateContent((next) => { next.intake.successMessage = value })} />
               <Field label="رسالة الفشل" value={content.intake.failureMessage} multiline onChange={(value) => updateContent((next) => { next.intake.failureMessage = value })} />
-              <p className="notice">مهم: الإرسال الفعلي يعتمد على متغيرات بيئة Vercel الخاصة بالبريد. لا تضع أي Secret داخل الواجهة.</p>
+              <p className="notice">الإرسال الفعلي يعتمد على Vercel env، أما نصوص الموقع فتُحفظ الآن سحابياً عند إعداد Supabase.</p>
             </article>
 
             <article className="panel wide">
