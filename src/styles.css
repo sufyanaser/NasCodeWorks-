@@ -87,3 +87,17 @@ h1 { font-size: clamp(42px, 6vw, 78px); line-height: .98; letter-spacing: -.07em
   .ops-card { min-height: 380px; }
   h1 { font-size: 42px; }
 }
+
+.request-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px; }
+.request-toolbar input, .request-toolbar select {
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.22);
+  color: #fff;
+  border-radius: 999px;
+  padding: 11px 14px;
+  outline: none;
+}
+.table-action { border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #f6f2e8; border-radius: 999px; padding: 7px 10px; }
+.table-action.danger { color: #ff9b9b; border-color: rgba(255,155,155,.3); }
+.submission-detail { margin-top: 16px; border: 1px solid rgba(85,214,210,.18); border-radius: 18px; padding: 16px; background: rgba(85,214,210,.05); }
+.submission-detail pre { white-space: pre-wrap; color: #dbe6ea; line-height: 1.8; margin: 0; }

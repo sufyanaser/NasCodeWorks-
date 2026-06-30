@@ -25,7 +25,8 @@ type VercelResponse = {
 
 type VercelRequest = {
   method?: string
-  body?: IntakePayload
+  body?: IntakePayload & { id?: string; status?: string }
+  query?: { id?: string }
 }
 
 const RESEND_API_URL = 'https://api.resend.com/emails'
@@ -78,6 +79,43 @@ async function listIntakeSubmissions() {
   return { ok: true, submissions }
 }
 
+async function updateIntakeStatus(id: string, status: string) {
+  const supabase = getSupabaseEnv()
+  if (!supabase) return { ok: false, message: 'Supabase is not configured.' }
+
+  const allowed = ['new', 'in_review', 'in_progress', 'completed', 'archived']
+  if (!allowed.includes(status)) return { ok: false, message: 'Invalid status.' }
+
+  const response = await fetch(`${supabase.url}/rest/v1/intake_submissions?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { ...supabaseHeaders(supabase.key), Prefer: 'return=minimal' },
+    body: JSON.stringify({ status }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText)
+    return { ok: false, message }
+  }
+
+  return { ok: true, message: 'Status updated.' }
+}
+
+async function deleteIntakeSubmission(id: string) {
+  const supabase = getSupabaseEnv()
+  if (!supabase) return { ok: false, message: 'Supabase is not configured.' }
+
+  const response = await fetch(`${supabase.url}/rest/v1/intake_submissions?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { ...supabaseHeaders(supabase.key), Prefer: 'return=minimal' },
+  })
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText)
+    return { ok: false, message }
+  }
+
+  return { ok: true, message: 'Submission deleted.' }
+}
 async function saveIntakeSubmission(input: { company: string; contact: string; problemType: string; description: string }) {
   const supabase = getSupabaseEnv()
 
@@ -160,7 +198,7 @@ async function sendEmail(input: { company: string; contact: string; problemType:
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
   if (req.method === 'OPTIONS') {
@@ -169,6 +207,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'GET') {
     const result = await listIntakeSubmissions()
+    return res.status(result.ok ? 200 : 503).json(result)
+  }
+
+  if (req.method === 'PATCH') {
+    const id = clean(req.body?.id)
+    const status = clean(req.body?.status)
+    if (!id || !status) return res.status(400).json({ ok: false, message: 'id and status are required.' })
+    const result = await updateIntakeStatus(id, status)
+    return res.status(result.ok ? 200 : 503).json(result)
+  }
+
+  if (req.method === 'DELETE') {
+    const id = clean(req.body?.id || req.query?.id)
+    if (!id) return res.status(400).json({ ok: false, message: 'id is required.' })
+    const result = await deleteIntakeSubmission(id)
     return res.status(result.ok ? 200 : 503).json(result)
   }
 
@@ -205,3 +258,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     email,
   })
 }
+
