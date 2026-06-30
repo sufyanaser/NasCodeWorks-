@@ -4,7 +4,6 @@
 const STORE_KEY='nascw_content_v2_fallback';
 const PASS_KEY='nascw_admin_pass';
 const SESSION_KEY='nascw_admin_ok';
-const DEFAULT_PASS='nascw2026';
 const CONTENT_API='/api/v2-content';
 const AUTH_API='/api/admin-auth';
 let C=null, DEFAULTS=null;
@@ -599,5 +598,6 @@ async function boot(){
   bindTopbar(); buildSide(); switchTo('hero');
 }
 initGate();
+
 
 
