@@ -34,7 +34,6 @@ const SECTIONS=[
 ];
 
 /* ---------- GATE ---------- */
-function currentPass(){ return localStorage.getItem(PASS_KEY) || DEFAULT_PASS; }
 async function initGate(){
   try{
     const r=await fetch(AUTH_API,{cache:'no-store'});
@@ -45,7 +44,7 @@ async function initGate(){
       return;
     }
     if(j && j.configured===false) $('#gate-err').textContent='ADMIN_ACCESS_CODE غير مضاف في Vercel.';
-  }catch(e){}
+  }catch{}
   const go=async()=>{
     const v=$('#gate-pass').value;
     $('#gate-err').textContent='جاري التحقق...';
@@ -63,7 +62,7 @@ async function initGate(){
         $('#gate-err').textContent=(j&&j.message)||'الرمز غير صحيح';
         $('#gate-pass').value='';
       }
-    }catch(e){
+    }catch{
       $('#gate-err').textContent='تعذر الاتصال بخدمة تسجيل الدخول';
     }
   };
@@ -78,7 +77,7 @@ async function loadAll(){
   try{
     const r=await fetch('content.json',{cache:'no-store'});
     if(r.ok) DEFAULTS=await r.json();
-  }catch(e){}
+  }catch{}
   if(!DEFAULTS && window.__DEFAULT_CONTENT__) DEFAULTS=JSON.parse(JSON.stringify(window.__DEFAULT_CONTENT__));
   try{
     const r=await fetch(CONTENT_API,{cache:'no-store'});
@@ -87,14 +86,14 @@ async function loadAll(){
       C=JSON.parse(JSON.stringify(j.content));
       return;
     }
-  }catch(e){}
+  }catch{}
   try{
     const s=localStorage.getItem(STORE_KEY);
     if(s){
       C=JSON.parse(s);
       return;
     }
-  }catch(e){}
+  }catch{}
   C=JSON.parse(JSON.stringify(DEFAULTS||{}));
   if(!DEFAULTS) DEFAULTS=JSON.parse(JSON.stringify(C));
 }
@@ -103,7 +102,7 @@ async function loadAll(){
 async function save(silent){
   C.meta=C.meta||{};
   C.meta.updatedAt=new Date().toISOString();
-  try{ localStorage.setItem(STORE_KEY,JSON.stringify(C)); }catch(e){}
+  try{ localStorage.setItem(STORE_KEY,JSON.stringify(C)); }catch{}
   try{
     const r=await fetch(CONTENT_API,{
       method:'PUT',
@@ -114,7 +113,7 @@ async function save(silent){
     if(!r.ok || !j.ok) throw new Error((j&&j.message)||'فشل الحفظ السحابي');
     if(!silent) toast('تم الحفظ سحابياً ✓');
     return true;
-  }catch(e){
+  }catch{
     toast((e&&e.message)||'فشل الحفظ السحابي',true);
     return false;
   }
@@ -172,14 +171,14 @@ function listEditor(arr,onChange,placeholder){
         <div class="ord"><button class="mini" data-up>${UP}</button><button class="mini" data-dn>${DN}</button></div>
         <button class="mini del" data-del>${TRASH}</button>`;
       const inp=row.querySelector('input'); inp.value=v||'';
-      inp.addEventListener('input',e=>{arr[i]=e.target.value;onChange&&onChange();});
-      row.querySelector('[data-up]').onclick=()=>{if(i>0){[arr[i-1],arr[i]]=[arr[i],arr[i-1]];onChange&&onChange();render();}};
-      row.querySelector('[data-dn]').onclick=()=>{if(i<arr.length-1){[arr[i+1],arr[i]]=[arr[i],arr[i+1]];onChange&&onChange();render();}};
-      row.querySelector('[data-del]').onclick=()=>{arr.splice(i,1);onChange&&onChange();render();};
+      inp.addEventListener('input',e=>{arr[i]=e.target.value;if(onChange)onChange();});
+      row.querySelector('[data-up]').onclick=()=>{if(i>0){[arr[i-1],arr[i]]=[arr[i],arr[i-1]];if(onChange)onChange();render();}};
+      row.querySelector('[data-dn]').onclick=()=>{if(i<arr.length-1){[arr[i+1],arr[i]]=[arr[i],arr[i+1]];if(onChange)onChange();render();}};
+      row.querySelector('[data-del]').onclick=()=>{arr.splice(i,1);if(onChange)onChange();render();};
       box.appendChild(row);
     });
     const add=ce('button',{className:'add-btn',innerHTML:svg('<path d="M12 5v14M5 12h14"/>')+' إضافة عنصر'});
-    add.onclick=()=>{arr.push('');onChange&&onChange();render();};
+    add.onclick=()=>{arr.push('');if(onChange)onChange();render();};
     box.appendChild(add);
   };
   render(); return box;
@@ -343,7 +342,7 @@ B.proof=()=>{
       drop.innerHTML=svg('<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>')+'<div class="dt">ارفع صور من جهازك</div><div class="ds">اضغط أو اسحب الصور هنا · تُضغط تلقائياً</div>';
       const inp=ce('input',{type:'file',accept:'image/*',multiple:true,style:'display:none'});
       drop.onclick=()=>inp.click();
-      const handle=async files=>{ for(const f of files){ if(!f.type.startsWith('image/'))continue; try{it.images.push(await fileToCompressedDataURL(f));}catch(e){} } drawImgs(); toast('تمت إضافة الصور — لا تنسَ الحفظ'); };
+      const handle=async files=>{ for(const f of files){ if(!f.type.startsWith('image/'))continue; try{it.images.push(await fileToCompressedDataURL(f));}catch{} } drawImgs(); toast('تمت إضافة الصور — لا تنسَ الحفظ'); };
       inp.onchange=e=>handle(e.target.files);
       drop.addEventListener('dragover',e=>{e.preventDefault();drop.style.borderColor='var(--cyan)';});
       drop.addEventListener('dragleave',()=>drop.style.borderColor='');
@@ -409,7 +408,7 @@ B.proof=()=>{
     sList.appendChild(add);
   };
   drawStats(); sw.appendChild(sList); fc.appendChild(sw);
-  list.parentNode && b.appendChild(fc);
+  if(list.parentNode)b.appendChild(fc);
   return cardWrap('proof','البرامج والصور','أضف برامجك وصورها — سلايد شو احترافي',b);
 };
 
@@ -589,7 +588,7 @@ function bindTopbar(){
   $('#file-import').onchange=e=>{
     const file=e.target.files[0]; if(!file)return;
     const r=new FileReader();
-    r.onload=()=>{ try{ C=JSON.parse(r.result); void save(true); toast('تم الاستيراد'); switchTo(CUR); }catch(err){ toast('ملف غير صالح',true); } };
+    r.onload=()=>{ try{ C=JSON.parse(r.result); void save(true); toast('تم الاستيراد'); switchTo(CUR); }catch{ toast('ملف غير صالح',true); } };
     r.readAsText(file); e.target.value='';
   };
 }
@@ -600,4 +599,5 @@ async function boot(){
   bindTopbar(); buildSide(); switchTo('hero');
 }
 initGate();
+
 

@@ -30,15 +30,15 @@ async function loadContent(){
     const api = await fetch('/api/v2-content', {cache:'no-store'});
     const result = await api.json();
     if(api.ok && result && result.ok && result.content) return result.content;
-  }catch(e){}
+  }catch{}
   try{
     const local = localStorage.getItem(STORE_KEY);
     if(local) return JSON.parse(local);
-  }catch(e){}
+  }catch{}
   try{
     const res = await fetch('content.json', {cache:'no-store'});
     if(res.ok) return await res.json();
-  }catch(e){}
+  }catch{}
   return window.__DEFAULT_CONTENT__ || {};
 }
 
@@ -248,7 +248,7 @@ const LB = {
     this.next.classList.toggle('disabled',this.i===this.imgs.length-1);
     this.foot.querySelectorAll('.lb-thumb').forEach((t,k)=>t.classList.toggle('active',k===this.i));
     this.dots.querySelectorAll('i').forEach((d,k)=>d.classList.toggle('active',k===this.i));
-    const at=this.foot.querySelector('.lb-thumb.active'); if(at&&at.scrollIntoView){try{at.scrollIntoView({inline:'center',behavior:'smooth',block:'nearest'});}catch(e){}}
+    const at=this.foot.querySelector('.lb-thumb.active'); if(at&&at.scrollIntoView){try{at.scrollIntoView({inline:'center',behavior:'smooth',block:'nearest'});}catch{}}
   },
   close(){
     this.el.classList.remove('show'); document.body.style.overflow='';
@@ -257,7 +257,6 @@ const LB = {
 };
 
 /* ---------- mount ---------- */
-let CONTENT=null;
 function bindGlobalCTAs(c){
   const wa=WA(c.contact.waNumber);
   const t=enc('السلام عليكم، أريد استشارة مجانية عن برنامج لشركتي');
@@ -288,7 +287,7 @@ function reveal(){
   document.querySelectorAll('.rv').forEach((el,i)=>{el.style.transitionDelay=(Math.min(i%6,5)*55)+'ms';io.observe(el);});
 }
 async function mount(){
-  const c=await loadContent(); CONTENT=c;
+  const c=await loadContent();
   document.getElementById('app').innerHTML=[
     heroHTML(c),painHTML(c),baHTML(c),servicesHTML(c),offerHTML(c),
     proofHTML(c),processHTML(c),whyHTML(c),startHTML(c),faqHTML(c),footerHTML(c)
@@ -296,4 +295,5 @@ async function mount(){
   bindGlobalCTAs(c); bindForm(c); LB.init(); bindProofGalleries(c); reveal();
 }
 mount();
+
 
