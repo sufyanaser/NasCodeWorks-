@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Cloud, Database, Inbox, Mail, RefreshCw, Save, Settings, ShieldCheck } from 'lucide-react'
 import { CONTENT_STORAGE_KEY, defaultContent, type SiteContent } from './content'
 
@@ -45,6 +45,14 @@ const emptyForm: IntakeForm = {
   description: '',
 }
 
+const requestStatuses = [
+  { value: 'new', label: 'New' },
+  { value: 'in_review', label: 'In Review' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'archived', label: 'Archived' },
+]
+
 function readStoredContent(): SiteContent {
   try {
     const stored = window.localStorage.getItem(CONTENT_STORAGE_KEY)
@@ -67,6 +75,10 @@ function formatDate(value: string) {
   }
 }
 
+function csvCell(value: unknown) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`
+}
+
 function Field({ label, value, multiline, onChange }: { label: string; value: string; multiline?: boolean; onChange: (value: string) => void }) {
   return (
     <label className="field">
@@ -86,8 +98,26 @@ function App() {
   const [submissions, setSubmissions] = useState<IntakeSubmission[]>([])
   const [submissionsStatus, setSubmissionsStatus] = useState('لم يتم تحميل الطلبات بعد')
   const [activeAdminSection, setActiveAdminSection] = useState<AdminSection>('identity')
+  const [requestSearch, setRequestSearch] = useState('')
+  const [requestStatusFilter, setRequestStatusFilter] = useState('all')
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null)
 
   const exportedJson = useMemo(() => JSON.stringify(content, null, 2), [content])
+
+  const filteredSubmissions = useMemo(() => {
+    const term = requestSearch.trim().toLowerCase()
+
+    return submissions.filter((submission) => {
+      const statusMatches = requestStatusFilter === 'all' || submission.status === requestStatusFilter
+      const text = [submission.company, submission.contact, submission.problem_type, submission.description, submission.status].join(' ').toLowerCase()
+      return statusMatches && (!term || text.includes(term))
+    })
+  }, [requestSearch, requestStatusFilter, submissions])
+
+  const selectedSubmission = useMemo(
+    () => submissions.find((submission) => submission.id === selectedSubmissionId) ?? null,
+    [selectedSubmissionId, submissions],
+  )
 
   useEffect(() => {
     window.localStorage.setItem(CONTENT_STORAGE_KEY, JSON.stringify(content))
@@ -167,6 +197,65 @@ function App() {
     }
   }
 
+  const updateSubmissionStatus = async (id: string, status: string) => {
+    setSubmissionsStatus('جاري تحديث حالة الطلب...')
+    const response = await fetch('/api/intake', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status }),
+    })
+    const result = await response.json().catch(() => ({ ok: false, message: 'Invalid intake API response' })) as IntakeApiResult
+
+    if (!response.ok || !result.ok) {
+      setSubmissionsStatus(result.message || 'فشل تحديث الحالة')
+      return
+    }
+
+    setSubmissions((current) => current.map((submission) => submission.id === id ? { ...submission, status } : submission))
+    setSubmissionsStatus('تم تحديث حالة الطلب')
+  }
+
+  const deleteSubmission = async (id: string) => {
+    if (!window.confirm('حذف هذا الطلب نهائياً؟')) return
+
+    setSubmissionsStatus('جاري حذف الطلب...')
+    const response = await fetch('/api/intake', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    const result = await response.json().catch(() => ({ ok: false, message: 'Invalid intake API response' })) as IntakeApiResult
+
+    if (!response.ok || !result.ok) {
+      setSubmissionsStatus(result.message || 'فشل حذف الطلب')
+      return
+    }
+
+    setSubmissions((current) => current.filter((submission) => submission.id !== id))
+    if (selectedSubmissionId === id) setSelectedSubmissionId(null)
+    setSubmissionsStatus('تم حذف الطلب')
+  }
+
+  const exportSubmissionsCsv = () => {
+    const header = ['Company', 'Contact', 'Problem Type', 'Status', 'Created At', 'Description']
+    const rows = filteredSubmissions.map((submission) => [
+      submission.company,
+      submission.contact ?? '',
+      submission.problem_type ?? '',
+      submission.status,
+      submission.created_at,
+      submission.description,
+    ])
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'nas-codeworks-intake-submissions.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   const resetLocalContent = () => {
     window.localStorage.removeItem(CONTENT_STORAGE_KEY)
     setContent(defaultContent)
@@ -219,6 +308,22 @@ function App() {
     }
   }
 
+  const AccordionSection = ({ id, title, children }: { id: AdminSection; title: string; children: ReactNode }) => {
+    const open = activeAdminSection === id
+
+    return (
+      <article className={`panel accordion-panel ${open ? 'open' : ''}`}>
+        <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(id)}>
+          <span>{title}</span>
+          <strong>{open ? '−' : '+'}</strong>
+        </button>
+        <div className="accordion-body">
+          <div className="accordion-body-inner">{children}</div>
+        </div>
+      </article>
+    )
+  }
+
   if (mode === 'admin') {
     return (
       <main className="admin-shell" dir="rtl">
@@ -250,27 +355,23 @@ function App() {
             </div>
           </header>
 
-          <div className="admin-grid admin-grid-separated">
-            <article className={`panel accordion-panel ${activeAdminSection === 'identity' ? 'open' : ''}`}>`n              <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(activeAdminSection === 'identity' ? 'sections' : 'identity')}>`n                <span>الهوية والواجهة</span>`n                <strong>{activeAdminSection === 'identity' ? '−' : '+'}</strong>`n              </button>`n              <div className="accordion-body"><div className="accordion-body-inner">
-              <Field label="اسم المشروع" value={content.brand.name} onChange={(value) => updateContent((next) => { next.brand.name = value })} />
-              <Field label="الوصف المختصر" value={content.brand.tagline} onChange={(value) => updateContent((next) => { next.brand.tagline = value })} />
-              <Field label="Hero Eyebrow" value={content.hero.eyebrow} onChange={(value) => updateContent((next) => { next.hero.eyebrow = value })} />
-              <Field label="عنوان Hero" value={content.hero.title} multiline onChange={(value) => updateContent((next) => { next.hero.title = value })} />
-              <Field label="نص Hero" value={content.hero.body} multiline onChange={(value) => updateContent((next) => { next.hero.body = value })} />`n              </div></div>`n            </article>
-
-            <article className={`panel accordion-panel ${activeAdminSection === 'intake' ? 'open' : ''}`}>`n              <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(activeAdminSection === 'intake' ? 'identity' : 'intake')}>`n                <span>إعدادات نموذج المشكلة</span>`n                <strong>{activeAdminSection === 'intake' ? '−' : '+'}</strong>`n              </button>`n              <div className="accordion-body"><div className="accordion-body-inner">
-              <Field label="إيميل استقبال الطلبات" value={content.intake.recipientEmail} onChange={(value) => updateContent((next) => { next.intake.recipientEmail = value })} />
-              <Field label="بادئة عنوان الإيميل" value={content.intake.subjectPrefix} onChange={(value) => updateContent((next) => { next.intake.subjectPrefix = value })} />
-              <Field label="رسالة النجاح" value={content.intake.successMessage} multiline onChange={(value) => updateContent((next) => { next.intake.successMessage = value })} />
-              <Field label="رسالة الفشل" value={content.intake.failureMessage} multiline onChange={(value) => updateContent((next) => { next.intake.failureMessage = value })} />
-              <p className="notice">يحفظ النموذج الطلبات في Supabase. إرسال الإيميل يصبح تلقائياً بعد إضافة RESEND_API_KEY.</p>`n              </div></div>`n            </article>
-
-            <article className="panel wide requests-panel">`n              <div className="panel-title-row">
+          <div className="admin-stack">
+            <article className="panel requests-panel">
+              <div className="panel-title-row">
                 <div>
                   <h2>طلبات العملاء</h2>
-                  <p className="notice">آخر 50 طلب من نموذج اكتب المشكلة.</p>
+                  <p className="notice">آخر 50 طلب من نموذج اكتب المشكلة. تظهر الطلبات هنا مباشرة من Supabase.</p>
                 </div>
                 <button className="secondary-button" type="button" onClick={() => void loadIntakeSubmissions(true)}><Inbox size={16} /> تحديث</button>
+              </div>
+
+              <div className="request-toolbar">
+                <input placeholder="بحث في الطلبات" value={requestSearch} onChange={(event) => setRequestSearch(event.target.value)} />
+                <select value={requestStatusFilter} onChange={(event) => setRequestStatusFilter(event.target.value)}>
+                  <option value="all">كل الحالات</option>
+                  {requestStatuses.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                </select>
+                <button className="table-action" type="button" onClick={exportSubmissionsCsv}>تصدير CSV</button>
               </div>
 
               <div className="submissions-table-wrap">
@@ -283,38 +384,75 @@ function App() {
                       <th>الحالة</th>
                       <th>التاريخ</th>
                       <th>الوصف</th>
+                      <th>إجراء</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {submissions.length ? submissions.map((submission) => (
+                    {filteredSubmissions.length ? filteredSubmissions.map((submission) => (
                       <tr key={submission.id}>
                         <td><strong>{submission.company}</strong></td>
                         <td>{submission.contact || '—'}</td>
                         <td>{submission.problem_type || '—'}</td>
-                        <td><span className="status-pill">{submission.status}</span></td>
+                        <td>
+                          <select className="status-select" value={submission.status} onChange={(event) => void updateSubmissionStatus(submission.id, event.target.value)}>
+                            {requestStatuses.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                          </select>
+                        </td>
                         <td>{formatDate(submission.created_at)}</td>
                         <td>{submission.description}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="table-action" type="button" onClick={() => setSelectedSubmissionId(submission.id)}>تفاصيل</button>
+                            <button className="table-action danger" type="button" onClick={() => void deleteSubmission(submission.id)}>حذف</button>
+                          </div>
+                        </td>
                       </tr>
                     )) : (
                       <tr>
-                        <td colSpan={6} className="empty-table">لا توجد طلبات بعد</td>
+                        <td colSpan={7} className="empty-table">لا توجد طلبات مطابقة</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
+
+              {selectedSubmission ? (
+                <div className="submission-detail">
+                  <h3>{selectedSubmission.company}</h3>
+                  <p className="notice">{selectedSubmission.contact || 'لا توجد وسيلة تواصل'} · {formatDate(selectedSubmission.created_at)}</p>
+                  <pre>{selectedSubmission.description}</pre>
+                </div>
+              ) : null}
             </article>
 
-            <article className={`panel wide accordion-panel ${activeAdminSection === 'sections' ? 'open' : ''}`}>`n              <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(activeAdminSection === 'sections' ? 'identity' : 'sections')}>`n                <span>أقسام الموقع</span>`n                <strong>{activeAdminSection === 'sections' ? '−' : '+'}</strong>`n              </button>`n              <div className="accordion-body"><div className="accordion-body-inner">
-              <div className="section-editors">
-                {content.sections.map((section, index) => (
-                  <div className="nested-editor" key={section.id}>
-                    <Field label={`عنوان القسم ${index + 1}`} value={section.title} onChange={(value) => updateContent((next) => { next.sections[index].title = value })} />
-                    <Field label="النص" value={section.body} multiline onChange={(value) => updateContent((next) => { next.sections[index].body = value })} />
-                  </div>
-                ))}
-              </div></div>`n            </div>
-            </article>
+            <div className="settings-accordion-grid">
+              <AccordionSection id="identity" title="الهوية والواجهة">
+                <Field label="اسم المشروع" value={content.brand.name} onChange={(value) => updateContent((next) => { next.brand.name = value })} />
+                <Field label="الوصف المختصر" value={content.brand.tagline} onChange={(value) => updateContent((next) => { next.brand.tagline = value })} />
+                <Field label="Hero Eyebrow" value={content.hero.eyebrow} onChange={(value) => updateContent((next) => { next.hero.eyebrow = value })} />
+                <Field label="عنوان Hero" value={content.hero.title} multiline onChange={(value) => updateContent((next) => { next.hero.title = value })} />
+                <Field label="نص Hero" value={content.hero.body} multiline onChange={(value) => updateContent((next) => { next.hero.body = value })} />
+              </AccordionSection>
+
+              <AccordionSection id="intake" title="إعدادات نموذج المشكلة">
+                <Field label="إيميل استقبال الطلبات" value={content.intake.recipientEmail} onChange={(value) => updateContent((next) => { next.intake.recipientEmail = value })} />
+                <Field label="بادئة عنوان الإيميل" value={content.intake.subjectPrefix} onChange={(value) => updateContent((next) => { next.intake.subjectPrefix = value })} />
+                <Field label="رسالة النجاح" value={content.intake.successMessage} multiline onChange={(value) => updateContent((next) => { next.intake.successMessage = value })} />
+                <Field label="رسالة الفشل" value={content.intake.failureMessage} multiline onChange={(value) => updateContent((next) => { next.intake.failureMessage = value })} />
+                <p className="notice">يحفظ النموذج الطلبات في Supabase. إرسال الإيميل يصبح تلقائياً بعد إضافة RESEND_API_KEY.</p>
+              </AccordionSection>
+
+              <AccordionSection id="sections" title="أقسام الموقع">
+                <div className="section-editors">
+                  {content.sections.map((section, index) => (
+                    <div className="nested-editor" key={section.id}>
+                      <Field label={`عنوان القسم ${index + 1}`} value={section.title} onChange={(value) => updateContent((next) => { next.sections[index].title = value })} />
+                      <Field label="النص" value={section.body} multiline onChange={(value) => updateContent((next) => { next.sections[index].body = value })} />
+                    </div>
+                  ))}
+                </div>
+              </AccordionSection>
+            </div>
           </div>
         </section>
       </main>
@@ -400,4 +538,3 @@ function App() {
 }
 
 export default App
-
