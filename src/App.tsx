@@ -21,6 +21,8 @@ type IntakeSubmission = {
 
 type ViewMode = 'site' | 'admin'
 
+type AdminSection = 'identity' | 'intake' | 'sections'
+
 type SubmitState = 'idle' | 'sending' | 'success' | 'error'
 
 type ContentApiResult = {
@@ -83,6 +85,7 @@ function App() {
   const [cloudStatus, setCloudStatus] = useState('Cloud content: local fallback')
   const [submissions, setSubmissions] = useState<IntakeSubmission[]>([])
   const [submissionsStatus, setSubmissionsStatus] = useState('لم يتم تحميل الطلبات بعد')
+  const [activeAdminSection, setActiveAdminSection] = useState<AdminSection>('identity')
 
   const exportedJson = useMemo(() => JSON.stringify(content, null, 2), [content])
 
@@ -247,27 +250,22 @@ function App() {
             </div>
           </header>
 
-          <div className="admin-grid">
-            <article className="panel">
-              <h2>الهوية والواجهة</h2>
+          <div className="admin-grid admin-grid-separated">
+            <article className={`panel accordion-panel ${activeAdminSection === 'identity' ? 'open' : ''}`}>`n              <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(activeAdminSection === 'identity' ? 'sections' : 'identity')}>`n                <span>الهوية والواجهة</span>`n                <strong>{activeAdminSection === 'identity' ? '−' : '+'}</strong>`n              </button>`n              <div className="accordion-body"><div className="accordion-body-inner">
               <Field label="اسم المشروع" value={content.brand.name} onChange={(value) => updateContent((next) => { next.brand.name = value })} />
               <Field label="الوصف المختصر" value={content.brand.tagline} onChange={(value) => updateContent((next) => { next.brand.tagline = value })} />
               <Field label="Hero Eyebrow" value={content.hero.eyebrow} onChange={(value) => updateContent((next) => { next.hero.eyebrow = value })} />
               <Field label="عنوان Hero" value={content.hero.title} multiline onChange={(value) => updateContent((next) => { next.hero.title = value })} />
-              <Field label="نص Hero" value={content.hero.body} multiline onChange={(value) => updateContent((next) => { next.hero.body = value })} />
-            </article>
+              <Field label="نص Hero" value={content.hero.body} multiline onChange={(value) => updateContent((next) => { next.hero.body = value })} />`n              </div></div>`n            </article>
 
-            <article className="panel">
-              <h2>إعدادات نموذج المشكلة</h2>
+            <article className={`panel accordion-panel ${activeAdminSection === 'intake' ? 'open' : ''}`}>`n              <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(activeAdminSection === 'intake' ? 'identity' : 'intake')}>`n                <span>إعدادات نموذج المشكلة</span>`n                <strong>{activeAdminSection === 'intake' ? '−' : '+'}</strong>`n              </button>`n              <div className="accordion-body"><div className="accordion-body-inner">
               <Field label="إيميل استقبال الطلبات" value={content.intake.recipientEmail} onChange={(value) => updateContent((next) => { next.intake.recipientEmail = value })} />
               <Field label="بادئة عنوان الإيميل" value={content.intake.subjectPrefix} onChange={(value) => updateContent((next) => { next.intake.subjectPrefix = value })} />
               <Field label="رسالة النجاح" value={content.intake.successMessage} multiline onChange={(value) => updateContent((next) => { next.intake.successMessage = value })} />
               <Field label="رسالة الفشل" value={content.intake.failureMessage} multiline onChange={(value) => updateContent((next) => { next.intake.failureMessage = value })} />
-              <p className="notice">يحفظ النموذج الطلبات في Supabase. إرسال الإيميل يصبح تلقائياً بعد إضافة RESEND_API_KEY.</p>
-            </article>
+              <p className="notice">يحفظ النموذج الطلبات في Supabase. إرسال الإيميل يصبح تلقائياً بعد إضافة RESEND_API_KEY.</p>`n              </div></div>`n            </article>
 
-            <article className="panel wide">
-              <div className="panel-title-row">
+            <article className="panel wide requests-panel">`n              <div className="panel-title-row">
                 <div>
                   <h2>طلبات العملاء</h2>
                   <p className="notice">آخر 50 طلب من نموذج اكتب المشكلة.</p>
@@ -307,8 +305,7 @@ function App() {
               </div>
             </article>
 
-            <article className="panel wide">
-              <h2>أقسام الموقع</h2>
+            <article className={`panel wide accordion-panel ${activeAdminSection === 'sections' ? 'open' : ''}`}>`n              <button className="accordion-trigger" type="button" onClick={() => setActiveAdminSection(activeAdminSection === 'sections' ? 'identity' : 'sections')}>`n                <span>أقسام الموقع</span>`n                <strong>{activeAdminSection === 'sections' ? '−' : '+'}</strong>`n              </button>`n              <div className="accordion-body"><div className="accordion-body-inner">
               <div className="section-editors">
                 {content.sections.map((section, index) => (
                   <div className="nested-editor" key={section.id}>
@@ -316,7 +313,7 @@ function App() {
                     <Field label="النص" value={section.body} multiline onChange={(value) => updateContent((next) => { next.sections[index].body = value })} />
                   </div>
                 ))}
-              </div>
+              </div></div>`n            </div>
             </article>
           </div>
         </section>
@@ -403,3 +400,4 @@ function App() {
 }
 
 export default App
+
