@@ -1,6 +1,30 @@
 {
   "rewrites": [
     {
+      "source": "/",
+      "destination": "/v2/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/v2/admin.html"
+    },
+    {
+      "source": "/content-default.js",
+      "destination": "/v2/content-default.js"
+    },
+    {
+      "source": "/render.js",
+      "destination": "/v2/render.js"
+    },
+    {
+      "source": "/admin.js",
+      "destination": "/v2/admin.js"
+    },
+    {
+      "source": "/content.json",
+      "destination": "/v2/content.json"
+    },
+    {
       "source": "/v2",
       "destination": "/v2/index.html"
     },
@@ -9,8 +33,8 @@
       "destination": "/v2/admin.html"
     },
     {
-      "source": "/((?!api/|v2/).*)",
-      "destination": "/index.html"
+      "source": "/((?!api/|v2/|content-default\\.js|render\\.js|admin\\.js|content\\.json).*)",
+      "destination": "/v2/index.html"
     }
   ]
 }
