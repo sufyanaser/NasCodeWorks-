@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Cloud, Database, Mail, Save, Settings, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Cloud, Database, Inbox, Mail, RefreshCw, Save, Settings, ShieldCheck } from 'lucide-react'
 import { CONTENT_STORAGE_KEY, defaultContent, type SiteContent } from './content'
 
 type IntakeForm = {
@@ -7,6 +7,16 @@ type IntakeForm = {
   contact: string
   problemType: string
   description: string
+}
+
+type IntakeSubmission = {
+  id: string
+  company: string
+  contact: string | null
+  problem_type: string | null
+  description: string
+  status: string
+  created_at: string
 }
 
 type ViewMode = 'site' | 'admin'
@@ -18,6 +28,12 @@ type ContentApiResult = {
   content?: SiteContent
   message?: string
   source?: string
+}
+
+type IntakeApiResult = {
+  ok: boolean
+  submissions?: IntakeSubmission[]
+  message?: string
 }
 
 const emptyForm: IntakeForm = {
@@ -37,6 +53,18 @@ function readStoredContent(): SiteContent {
   }
 }
 
+function formatDate(value: string) {
+  if (!value) return '—'
+  try {
+    return new Intl.DateTimeFormat('ar-IQ', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
 function Field({ label, value, multiline, onChange }: { label: string; value: string; multiline?: boolean; onChange: (value: string) => void }) {
   return (
     <label className="field">
@@ -53,6 +81,8 @@ function App() {
   const [submitState, setSubmitState] = useState<SubmitState>('idle')
   const [submitMessage, setSubmitMessage] = useState('')
   const [cloudStatus, setCloudStatus] = useState('Cloud content: local fallback')
+  const [submissions, setSubmissions] = useState<IntakeSubmission[]>([])
+  const [submissionsStatus, setSubmissionsStatus] = useState('لم يتم تحميل الطلبات بعد')
 
   const exportedJson = useMemo(() => JSON.stringify(content, null, 2), [content])
 
@@ -63,6 +93,12 @@ function App() {
   useEffect(() => {
     void loadCloudContent(false)
   }, [])
+
+  useEffect(() => {
+    if (mode === 'admin') {
+      void loadIntakeSubmissions(false)
+    }
+  }, [mode])
 
   const updateContent = (mutate: (next: SiteContent) => void) => {
     setContent((current) => {
@@ -110,6 +146,24 @@ function App() {
     }
   }
 
+  const loadIntakeSubmissions = async (showStatus = true) => {
+    try {
+      if (showStatus) setSubmissionsStatus('جاري تحميل طلبات العملاء...')
+      const response = await fetch('/api/intake')
+      const result = await response.json().catch(() => ({ ok: false, message: 'Invalid intake API response' })) as IntakeApiResult
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || 'فشل تحميل الطلبات')
+      }
+
+      const loaded = result.submissions ?? []
+      setSubmissions(loaded)
+      setSubmissionsStatus(loaded.length ? `تم تحميل ${loaded.length} طلب` : 'لا توجد طلبات بعد')
+    } catch (error) {
+      setSubmissionsStatus(error instanceof Error ? error.message : 'فشل تحميل الطلبات')
+    }
+  }
+
   const resetLocalContent = () => {
     window.localStorage.removeItem(CONTENT_STORAGE_KEY)
     setContent(defaultContent)
@@ -150,7 +204,7 @@ function App() {
       const result = await response.json().catch(() => ({ ok: false, message: 'Invalid server response' }))
 
       if (!response.ok || !result.ok) {
-        throw new Error(result.message || 'Email delivery failed')
+        throw new Error(result.message || 'Intake delivery failed')
       }
 
       setSubmitState('success')
@@ -175,8 +229,10 @@ function App() {
             <button className="secondary-button" type="button" onClick={() => { window.history.pushState(null, '', '/'); setMode('site') }}>العودة للموقع</button>
             <button className="secondary-button" type="button" onClick={() => void loadCloudContent(true)}><Cloud size={16} /> تحميل سحابي</button>
             <button className="primary-button" type="button" onClick={() => void saveCloudContent()}><Save size={16} /> حفظ سحابي</button>
+            <button className="secondary-button" type="button" onClick={() => void loadIntakeSubmissions(true)}><RefreshCw size={16} /> تحديث الطلبات</button>
           </div>
           <p className="notice">{cloudStatus}</p>
+          <p className="notice">{submissionsStatus}</p>
         </aside>
 
         <section className="admin-workspace">
@@ -207,7 +263,48 @@ function App() {
               <Field label="بادئة عنوان الإيميل" value={content.intake.subjectPrefix} onChange={(value) => updateContent((next) => { next.intake.subjectPrefix = value })} />
               <Field label="رسالة النجاح" value={content.intake.successMessage} multiline onChange={(value) => updateContent((next) => { next.intake.successMessage = value })} />
               <Field label="رسالة الفشل" value={content.intake.failureMessage} multiline onChange={(value) => updateContent((next) => { next.intake.failureMessage = value })} />
-              <p className="notice">الإرسال الفعلي يعتمد على Vercel env، أما نصوص الموقع فتُحفظ الآن سحابياً عند إعداد Supabase.</p>
+              <p className="notice">يحفظ النموذج الطلبات في Supabase. إرسال الإيميل يصبح تلقائياً بعد إضافة RESEND_API_KEY.</p>
+            </article>
+
+            <article className="panel wide">
+              <div className="panel-title-row">
+                <div>
+                  <h2>طلبات العملاء</h2>
+                  <p className="notice">آخر 50 طلب من نموذج اكتب المشكلة.</p>
+                </div>
+                <button className="secondary-button" type="button" onClick={() => void loadIntakeSubmissions(true)}><Inbox size={16} /> تحديث</button>
+              </div>
+
+              <div className="submissions-table-wrap">
+                <table className="submissions-table">
+                  <thead>
+                    <tr>
+                      <th>الشركة</th>
+                      <th>التواصل</th>
+                      <th>نوع المشكلة</th>
+                      <th>الحالة</th>
+                      <th>التاريخ</th>
+                      <th>الوصف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submissions.length ? submissions.map((submission) => (
+                      <tr key={submission.id}>
+                        <td><strong>{submission.company}</strong></td>
+                        <td>{submission.contact || '—'}</td>
+                        <td>{submission.problem_type || '—'}</td>
+                        <td><span className="status-pill">{submission.status}</span></td>
+                        <td>{formatDate(submission.created_at)}</td>
+                        <td>{submission.description}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={6} className="empty-table">لا توجد طلبات بعد</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </article>
 
             <article className="panel wide">
