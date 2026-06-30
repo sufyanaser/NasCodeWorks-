@@ -24,8 +24,101 @@ function clean(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function cleanUrl(value: unknown) {
+  return clean(value).replace(/\/$/, '')
+}
+
 function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function getSupabaseEnv() {
+  const url = cleanUrl(process.env.SUPABASE_URL)
+  const key = clean(process.env.SUPABASE_SERVICE_ROLE_KEY)
+
+  if (!url || !key) return null
+  return { url, key }
+}
+
+function supabaseHeaders(key: string) {
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+  }
+}
+
+async function saveIntakeSubmission(input: { company: string; contact: string; problemType: string; description: string }) {
+  const supabase = getSupabaseEnv()
+
+  if (!supabase) {
+    return { ok: false, message: 'Supabase is not configured.' }
+  }
+
+  const response = await fetch(`${supabase.url}/rest/v1/intake_submissions`, {
+    method: 'POST',
+    headers: {
+      ...supabaseHeaders(supabase.key),
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({
+      company: input.company,
+      contact: input.contact,
+      problem_type: input.problemType,
+      description: input.description,
+      status: 'new',
+      created_at: new Date().toISOString(),
+    }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText)
+    return { ok: false, message }
+  }
+
+  return { ok: true, message: 'Saved to Supabase.' }
+}
+
+async function sendEmail(input: { company: string; contact: string; problemType: string; description: string; recipientEmail: string; subjectPrefix: string }) {
+  const fromEmail = clean(process.env.NAS_INTAKE_FROM) || 'NAS CodeWorks <onboarding@resend.dev>'
+  const resendApiKey = clean(process.env.RESEND_API_KEY)
+
+  if (!resendApiKey) {
+    return { ok: false, message: 'RESEND_API_KEY is not configured.' }
+  }
+
+  const subject = `${input.subjectPrefix}: ${input.company}`
+  const text = [
+    'New NAS CodeWorks intake submission',
+    '',
+    `Company: ${input.company}`,
+    `Contact: ${input.contact || 'Not provided'}`,
+    `Problem type: ${input.problemType}`,
+    '',
+    'Problem description:',
+    input.description,
+  ].join('\n')
+
+  const response = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: input.recipientEmail,
+      subject,
+      text,
+    }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText)
+    return { ok: false, message }
+  }
+
+  return { ok: true, message: 'Email sent.' }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -49,8 +142,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestedRecipient = clean(payload.recipientEmail)
   const recipientEmail = configuredRecipient || requestedRecipient
   const subjectPrefix = clean(payload.subjectPrefix) || 'NAS CodeWorks Intake'
-  const fromEmail = clean(process.env.NAS_INTAKE_FROM) || 'NAS CodeWorks <onboarding@resend.dev>'
-  const resendApiKey = clean(process.env.RESEND_API_KEY)
 
   if (!company || !description) {
     return res.status(400).json({ ok: false, message: 'Company and problem description are required.' })
@@ -60,40 +151,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, message: 'Recipient email is missing or invalid.' })
   }
 
-  if (!resendApiKey) {
-    return res.status(500).json({ ok: false, message: 'RESEND_API_KEY is not configured.' })
+  const storage = await saveIntakeSubmission({ company, contact, problemType, description })
+  const email = await sendEmail({ company, contact, problemType, description, recipientEmail, subjectPrefix })
+
+  if (!email.ok) {
+    return res.status(502).json({ ok: false, message: email.message, storage })
   }
 
-  const subject = `${subjectPrefix}: ${company}`
-  const text = [
-    'New NAS CodeWorks intake submission',
-    '',
-    `Company: ${company}`,
-    `Contact: ${contact || 'Not provided'}`,
-    `Problem type: ${problemType}`,
-    '',
-    'Problem description:',
-    description,
-  ].join('\n')
-
-  const response = await fetch(RESEND_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: recipientEmail,
-      subject,
-      text,
-    }),
-  })
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => response.statusText)
-    return res.status(502).json({ ok: false, message })
-  }
-
-  return res.status(200).json({ ok: true, message: 'Email sent.' })
+  return res.status(200).json({ ok: true, message: 'Intake saved and email sent.', storage, email })
 }
