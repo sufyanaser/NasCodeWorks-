@@ -25,6 +25,8 @@ type AdminSection = 'identity' | 'intake' | 'sections'
 
 type SubmitState = 'idle' | 'sending' | 'success' | 'error'
 
+type AdminAuthState = 'checking' | 'authenticated' | 'anonymous'
+
 type ContentApiResult = {
   ok: boolean
   content?: SiteContent
@@ -35,6 +37,13 @@ type ContentApiResult = {
 type IntakeApiResult = {
   ok: boolean
   submissions?: IntakeSubmission[]
+  message?: string
+}
+
+type AdminAuthResult = {
+  ok: boolean
+  authenticated?: boolean
+  configured?: boolean
   message?: string
 }
 
@@ -101,6 +110,9 @@ function App() {
   const [requestSearch, setRequestSearch] = useState('')
   const [requestStatusFilter, setRequestStatusFilter] = useState('all')
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null)
+  const [adminAuthState, setAdminAuthState] = useState<AdminAuthState>('checking')
+  const [adminCode, setAdminCode] = useState('')
+  const [adminAuthMessage, setAdminAuthMessage] = useState('')
 
   const exportedJson = useMemo(() => JSON.stringify(content, null, 2), [content])
 
@@ -129,9 +141,15 @@ function App() {
 
   useEffect(() => {
     if (mode === 'admin') {
-      void loadIntakeSubmissions(false)
+      void checkAdminAuth()
     }
   }, [mode])
+
+  useEffect(() => {
+    if (mode === 'admin' && adminAuthState === 'authenticated') {
+      void loadIntakeSubmissions(false)
+    }
+  }, [mode, adminAuthState])
 
   const updateContent = (mutate: (next: SiteContent) => void) => {
     setContent((current) => {
@@ -139,6 +157,58 @@ function App() {
       mutate(next)
       return next
     })
+  }
+
+  const checkAdminAuth = async () => {
+    try {
+      setAdminAuthState('checking')
+      const response = await fetch('/api/admin-auth')
+      const result = await response.json().catch(() => ({ ok: false, authenticated: false, message: 'Invalid auth response' })) as AdminAuthResult
+
+      if (!result.configured) {
+        setAdminAuthState('anonymous')
+        setAdminAuthMessage('ADMIN_ACCESS_CODE غير مضاف في Vercel Environment Variables.')
+        return
+      }
+
+      setAdminAuthState(response.ok && result.authenticated ? 'authenticated' : 'anonymous')
+      setAdminAuthMessage(response.ok && result.authenticated ? '' : 'أدخل كود الإدارة للمتابعة.')
+    } catch (error) {
+      setAdminAuthState('anonymous')
+      setAdminAuthMessage(error instanceof Error ? error.message : 'تعذر التحقق من جلسة الإدارة')
+    }
+  }
+
+  const loginAdmin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    try {
+      setAdminAuthMessage('جاري التحقق...')
+      const response = await fetch('/api/admin-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: adminCode }),
+      })
+      const result = await response.json().catch(() => ({ ok: false, message: 'Invalid auth response' })) as AdminAuthResult
+
+      if (!response.ok || !result.ok || !result.authenticated) {
+        throw new Error(result.message || 'فشل تسجيل الدخول')
+      }
+
+      setAdminAuthState('authenticated')
+      setAdminAuthMessage('')
+      setAdminCode('')
+    } catch (error) {
+      setAdminAuthState('anonymous')
+      setAdminAuthMessage(error instanceof Error ? error.message : 'فشل تسجيل الدخول')
+    }
+  }
+
+  const logoutAdmin = async () => {
+    await fetch('/api/admin-auth', { method: 'DELETE' }).catch(() => null)
+    setAdminAuthState('anonymous')
+    setSubmissions([])
+    setAdminAuthMessage('تم تسجيل الخروج.')
   }
 
   const loadCloudContent = async (showStatus = true) => {
@@ -182,7 +252,7 @@ function App() {
   const loadIntakeSubmissions = async (showStatus = true) => {
     try {
       if (showStatus) setSubmissionsStatus('جاري تحميل طلبات العملاء...')
-      const response = await fetch('/api/intake')
+      const response = await fetch('/api/admin-intake')
       const result = await response.json().catch(() => ({ ok: false, message: 'Invalid intake API response' })) as IntakeApiResult
 
       if (!response.ok || !result.ok) {
@@ -199,7 +269,7 @@ function App() {
 
   const updateSubmissionStatus = async (id: string, status: string) => {
     setSubmissionsStatus('جاري تحديث حالة الطلب...')
-    const response = await fetch('/api/intake', {
+    const response = await fetch('/api/admin-intake', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, status }),
@@ -219,7 +289,7 @@ function App() {
     if (!window.confirm('حذف هذا الطلب نهائياً؟')) return
 
     setSubmissionsStatus('جاري حذف الطلب...')
-    const response = await fetch('/api/intake', {
+    const response = await fetch('/api/admin-intake', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
@@ -325,6 +395,31 @@ function App() {
   }
 
   if (mode === 'admin') {
+    if (adminAuthState !== 'authenticated') {
+      return (
+        <main className="admin-shell" dir="rtl">
+          <aside className="admin-sidebar">
+            <div className="brand-lockup"><strong>NAS</strong><span>CodeWorks Admin</span></div>
+            <p>لوحة الإدارة محمية بكود دخول. أضف ADMIN_ACCESS_CODE في Vercel ثم استخدمه هنا.</p>
+            <button className="secondary-button" type="button" onClick={() => { window.history.pushState(null, '', '/'); setMode('site') }}>العودة للموقع</button>
+          </aside>
+          <section className="admin-workspace">
+            <header className="admin-header">
+              <div>
+                <span>Admin Gate</span>
+                <h1>تسجيل دخول لوحة الإدارة</h1>
+              </div>
+            </header>
+            <form className="panel intake-form" onSubmit={loginAdmin}>
+              <Field label="كود الإدارة" value={adminCode} onChange={setAdminCode} />
+              <button className="primary-button" type="submit" disabled={adminAuthState === 'checking'}>{adminAuthState === 'checking' ? 'جاري التحقق...' : 'دخول'}</button>
+              <p className="notice">{adminAuthMessage}</p>
+            </form>
+          </section>
+        </main>
+      )
+    }
+
     return (
       <main className="admin-shell" dir="rtl">
         <aside className="admin-sidebar">
@@ -338,6 +433,7 @@ function App() {
             <button className="secondary-button" type="button" onClick={() => void loadCloudContent(true)}><Cloud size={16} /> تحميل سحابي</button>
             <button className="primary-button" type="button" onClick={() => void saveCloudContent()}><Save size={16} /> حفظ سحابي</button>
             <button className="secondary-button" type="button" onClick={() => void loadIntakeSubmissions(true)}><RefreshCw size={16} /> تحديث الطلبات</button>
+            <button className="secondary-button" type="button" onClick={() => void logoutAdmin()}>تسجيل الخروج</button>
           </div>
           <p className="notice">{cloudStatus}</p>
           <p className="notice">{submissionsStatus}</p>
