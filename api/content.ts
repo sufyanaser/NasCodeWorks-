@@ -40,6 +40,7 @@ type VercelResponse = {
 type VercelRequest = {
   method?: string
   body?: SiteContent
+  headers?: { cookie?: string }
 }
 
 type SupabaseContentRow = {
@@ -47,6 +48,7 @@ type SupabaseContentRow = {
 }
 
 const CONTENT_KEY = 'main'
+const ADMIN_COOKIE_NAME = 'nas_admin_session'
 
 const defaultContent: SiteContent = {
   brand: {
@@ -107,6 +109,34 @@ const defaultContent: SiteContent = {
 
 function clean(value: unknown) {
   return typeof value === 'string' ? value.trim().replace(/\/$/, '') : ''
+}
+
+function getAuthSalt() {
+  return clean(process.env.ADMIN_AUTH_SALT) || 'nas-codeworks-admin-v1'
+}
+
+function getCookieValue(cookieHeader: string | undefined, name: string) {
+  if (!cookieHeader) return ''
+  const match = cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))
+  if (!match) return ''
+
+  try {
+    return decodeURIComponent(match.slice(name.length + 1))
+  } catch {
+    return ''
+  }
+}
+
+async function makeSessionToken(code: string) {
+  const input = new TextEncoder().encode(`${code}:${getAuthSalt()}`)
+  const digest = await crypto.subtle.digest('SHA-256', input)
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function isAdminAuthorized(req: VercelRequest) {
+  const adminCode = clean(process.env.ADMIN_ACCESS_CODE)
+  if (!adminCode) return false
+  return getCookieValue(req.headers?.cookie, ADMIN_COOKIE_NAME) === await makeSessionToken(adminCode)
 }
 
 function getSupabaseEnv() {
@@ -192,6 +222,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'PUT') {
+    if (!await isAdminAuthorized(req)) {
+      return res.status(401).json({ ok: false, message: 'Admin authentication required.' })
+    }
+
     const content = req.body
 
     if (!content || typeof content !== 'object') {
